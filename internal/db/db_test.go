@@ -24,5 +24,5 @@ func TestInit(t *testing.T) {
 
 func teardown(dbFile *os.File) {
 	dbFile.Close()
-	os.Remove(globals.DbName)
+	os.RemoveAll(globals.AppDataDir)
 }

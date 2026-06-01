@@ -20,34 +20,40 @@ const AppName = "sqncr"
 var (
 	Environment Environments
 	DbName      string
+	AppDataDir  string
+	AppStateDir string
 )
 
 func Init() error {
+	if err := initXDGDirs(); err != nil {
+		return err
+	}
 	if isDev() {
 		return initEnv(Dev)
-	} else {
-		return initEnv(Prod)
 	}
+	return initEnv(Prod)
 }
 
 func InitTest() error {
+	tmpDir, err := os.MkdirTemp("", "sqncr-test-*")
+	if err != nil {
+		return err
+	}
+	AppDataDir = tmpDir
+	AppStateDir = tmpDir
 	return initEnv(Test)
 }
 
 func initEnv(env Environments) error {
 	Environment = env
 
-	if env == Dev {
-		DbName = "dev.db"
-	} else if env == Test {
-		DbName = "test.db"
-	} else {
-		dbName, err := initProdDbPath()
-		if err != nil {
-			return err
-		}
-
-		DbName = dbName
+	switch env {
+	case Test:
+		DbName = filepath.Join(AppDataDir, "test.db")
+	case Dev:
+		DbName = filepath.Join(AppDataDir, "dev.db")
+	default:
+		DbName = filepath.Join(AppDataDir, fmt.Sprintf("%s.db", AppName))
 	}
 
 	return nil
@@ -62,29 +68,38 @@ func isDev() bool {
 	return false
 }
 
-func isWindows() bool {
-	return runtime.GOOS == "windows"
-}
+func initXDGDirs() error {
+	var dataDir, stateDir string
 
-func initProdDbPath() (string, error) {
-	var dir string
-
-	if isWindows() {
-		dir = filepath.Join(os.Getenv("LOCALAPPDATA"), AppName)
+	if runtime.GOOS == "windows" {
+		dataDir = filepath.Join(os.Getenv("LOCALAPPDATA"), AppName)
+		stateDir = dataDir
 	} else {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
-			return "", err
+			return err
 		}
 
-		dir = filepath.Join(homeDir, ".local", "share", AppName)
+		dataHome := os.Getenv("XDG_DATA_HOME")
+		if dataHome == "" {
+			dataHome = filepath.Join(homeDir, ".local", "share")
+		}
+		stateHome := os.Getenv("XDG_STATE_HOME")
+		if stateHome == "" {
+			stateHome = filepath.Join(homeDir, ".local", "state")
+		}
+
+		dataDir = filepath.Join(dataHome, AppName)
+		stateDir = filepath.Join(stateHome, AppName)
 	}
 
-	err := os.MkdirAll(dir, 0755)
-	if err != nil {
-		return "", err
+	for _, dir := range []string{dataDir, stateDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
 	}
 
-	path := filepath.Join(dir, fmt.Sprintf("%v.db", AppName))
-	return path, err
+	AppDataDir = dataDir
+	AppStateDir = stateDir
+	return nil
 }
