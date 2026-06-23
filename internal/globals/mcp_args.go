@@ -22,4 +22,8 @@ const (
 	BlockerText    McpArg = "BlockerText"
 	Note           McpArg = "Note"
 	CriterionId    McpArg = "CriterionId"
+	TaskUpdates    McpArg = "TaskUpdates"
+	Phases         McpArg = "Phases"
+	ExitCriteria   McpArg = "ExitCriteria"
+	Status         McpArg = "Status"
 )

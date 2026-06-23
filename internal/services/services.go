@@ -174,11 +174,11 @@ func (s *Services) GetTasksByProject(ctx context.Context, projectId int64) ([]mo
 	return result, nil
 }
 
-func (s *Services) AddTask(ctx context.Context, projectId int64, args models.CreateTaskArgs) error {
+func (s *Services) AddTask(ctx context.Context, projectId int64, args models.CreateTaskArgs) (int64, error) {
 
 	tasks, err := s.Queries.GetTasksByProject(ctx, projectId)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	if int64(args.SortId) != TaskSortLast {
@@ -191,7 +191,7 @@ func (s *Services) AddTask(ctx context.Context, projectId int64, args models.Cre
 				}
 				err := s.Queries.UpdateTaskSort(ctx, params)
 				if err != nil {
-					return fmt.Errorf("Unable to update Sort ID to '%v' for TaskID '%v'\nError: %w", t.Sort, t.TaskID, err)
+					return 0, fmt.Errorf("Unable to update Sort ID to '%v' for TaskID '%v'\nError: %w", t.Sort, t.TaskID, err)
 				}
 			}
 		}
@@ -227,7 +227,7 @@ func (s *Services) AddTask(ctx context.Context, projectId int64, args models.Cre
 	}
 	validationTasks := append(tasks, newTask)
 	if err = s.TaskArrayValidator.Validate(validationTasks); err != nil {
-		return fmt.Errorf("Error validating Task array: %w", err)
+		return 0, fmt.Errorf("Error validating Task array: %w", err)
 	}
 
 	params := projectsdb.CreateTaskParams{
@@ -243,7 +243,7 @@ func (s *Services) AddTask(ctx context.Context, projectId int64, args models.Cre
 
 	savedTask, err := s.Queries.CreateTask(ctx, params)
 	if err != nil {
-		return fmt.Errorf("Error saving new Task to DB: %w", err)
+		return 0, fmt.Errorf("Error saving new Task to DB: %w", err)
 	}
 	deps := s.DependencyTransformer.FromInts(args.Dependencies, int(savedTask.TaskID), models.TaskId)
 
@@ -254,7 +254,7 @@ func (s *Services) AddTask(ctx context.Context, projectId int64, args models.Cre
 
 	err = s.DependencyValidator.Validate(deps, taskIds)
 	if err != nil {
-		return fmt.Errorf("Error validating dependency structure: %w", err)
+		return 0, fmt.Errorf("Error validating dependency structure: %w", err)
 	}
 
 	for _, d := range deps {
@@ -265,11 +265,11 @@ func (s *Services) AddTask(ctx context.Context, projectId int64, args models.Cre
 
 		err = s.Queries.AddDependencyForTask(ctx, args)
 		if err != nil {
-			return fmt.Errorf("Error saving dependency '{ %v, %v }' to database: %w", args.TaskID, args.DependsOn, err)
+			return 0, fmt.Errorf("Error saving dependency '{ %v, %v }' to database: %w", args.TaskID, args.DependsOn, err)
 		}
 	}
 
-	return nil
+	return savedTask.TaskID, nil
 }
 
 func (s *Services) UpdateTaskState(ctx context.Context, taskId int64, state TaskState) error {
@@ -505,4 +505,102 @@ func (s *Services) GetDownstreamTasks(ctx context.Context, taskId int64) ([]int6
 
 func (s *Services) GetUpstreamTasks(ctx context.Context, taskId int64) ([]int64, error) {
 	return s.Queries.GetUpstreamTasks(ctx, taskId)
+}
+
+func (s *Services) DeleteTask(ctx context.Context, taskId int64) error {
+	if err := s.Queries.DeleteDependenciesForTask(ctx, taskId); err != nil {
+		return fmt.Errorf("failed to delete dependencies for task %d: %w", taskId, err)
+	}
+	if err := s.Queries.DeleteTask(ctx, taskId); err != nil {
+		return fmt.Errorf("failed to delete task %d: %w", taskId, err)
+	}
+	return nil
+}
+
+func (s *Services) BatchAddTasks(ctx context.Context, projectId int64, tasks []models.CreateTaskArgs) ([]int64, error) {
+	ids := make([]int64, 0, len(tasks))
+	for _, t := range tasks {
+		id, err := s.AddTask(ctx, projectId, t)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add task '%s': %w", t.Name, err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func (s *Services) BatchUpdateTasks(ctx context.Context, updates []models.BatchTaskUpdate) (int, error) {
+	count := 0
+	for _, u := range updates {
+		taskId := int64(u.TaskId)
+
+		if u.Owner != nil {
+			if err := s.SetTaskOwner(ctx, taskId, models.Owner(*u.Owner)); err != nil {
+				return count, fmt.Errorf("failed to set owner for task %d: %w", taskId, err)
+			}
+		}
+
+		if u.PhaseId != nil || u.ScheduledDate != nil {
+			date := ""
+			if u.ScheduledDate != nil {
+				date = *u.ScheduledDate
+			}
+			if err := s.SetTaskSchedule(ctx, taskId, date, u.PhaseId); err != nil {
+				return count, fmt.Errorf("failed to set schedule for task %d: %w", taskId, err)
+			}
+		}
+
+		if u.Status != nil {
+			switch *u.Status {
+			case "complete":
+				if err := s.UpdateTaskState(ctx, taskId, StateComplete); err != nil {
+					return count, fmt.Errorf("failed to update status for task %d: %w", taskId, err)
+				}
+			case "in_progress":
+				if err := s.UpdateTaskState(ctx, taskId, StateInProgress); err != nil {
+					return count, fmt.Errorf("failed to update status for task %d: %w", taskId, err)
+				}
+			case "not_started":
+				if err := s.UpdateTaskState(ctx, taskId, StatePending); err != nil {
+					return count, fmt.Errorf("failed to update status for task %d: %w", taskId, err)
+				}
+			default:
+				return count, fmt.Errorf("unknown status '%s' for task %d", *u.Status, taskId)
+			}
+		}
+
+		count++
+	}
+	return count, nil
+}
+
+func (s *Services) BatchCreatePhases(ctx context.Context, projectId int, phases []models.BatchPhaseArgs) ([]models.Phase, error) {
+	result := make([]models.Phase, 0, len(phases))
+	for _, p := range phases {
+		phase, err := s.CreatePhase(ctx, models.Phase{
+			ProjectId:   projectId,
+			Name:        p.Name,
+			Description: p.Description,
+			StartDate:   p.StartDate,
+			EndDate:     p.EndDate,
+			Sort:        p.SortId,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create phase '%s': %w", p.Name, err)
+		}
+		result = append(result, phase)
+	}
+	return result, nil
+}
+
+func (s *Services) BatchAddExitCriteria(ctx context.Context, criteria []models.BatchExitCriterionArgs) ([]models.ExitCriterion, error) {
+	result := make([]models.ExitCriterion, 0, len(criteria))
+	for _, c := range criteria {
+		criterion, err := s.AddExitCriterion(ctx, int64(c.PhaseId), c.Description, c.SortId)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add exit criterion to phase %d: %w", c.PhaseId, err)
+		}
+		result = append(result, criterion)
+	}
+	return result, nil
 }

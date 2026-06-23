@@ -307,3 +307,51 @@ var GetUpstreamTasksTool = mcp.NewTool("getUpstreamTasks",
 		mcp.Description("ID of the task"),
 	),
 )
+
+var DeleteTaskTool = mcp.NewTool("deleteTask",
+	mcp.WithDescription("Delete a task by ID, cascading delete of its dependencies"),
+	mcp.WithNumber(string(globals.TaskId),
+		mcp.Required(),
+		mcp.Description("ID of the task to delete"),
+	),
+)
+
+var BatchUpdateTasksTool = mcp.NewTool("batchUpdateTasks",
+	mcp.WithDescription("Update multiple tasks at once (set owner, schedule/phase, and/or status)"),
+	mcp.WithString(string(globals.TaskUpdates),
+		mcp.Required(),
+		mcp.Description("JSON array of task updates. Each update: { taskId (required int), owner (optional string), phaseId (optional int), scheduledDate (optional string), status (optional string: \"complete\" | \"in_progress\" | \"not_started\") }"),
+	),
+)
+
+var BatchAddTasksTool = mcp.NewTool("batchAddTasks",
+	mcp.WithDescription("Add multiple tasks to a project at once"),
+	mcp.WithNumber(string(globals.ProjectId),
+		mcp.Required(),
+		mcp.Description("ID of the project to add tasks to"),
+	),
+	mcp.WithString(string(globals.Tasks),
+		mcp.Required(),
+		mcp.Description("JSON array of task definitions. Each task: { name, description, sortId, dependencies (optional []int), owner (optional), scheduledDate (optional), phaseId (optional), estimatedHours (optional) }"),
+	),
+)
+
+var BatchAddExitCriteriaTool = mcp.NewTool("batchAddExitCriteria",
+	mcp.WithDescription("Add multiple exit criteria to phases at once"),
+	mcp.WithString(string(globals.ExitCriteria),
+		mcp.Required(),
+		mcp.Description("JSON array of exit criteria. Each: { phaseId (int), description (string), sortId (int) }"),
+	),
+)
+
+var BatchCreatePhasesTool = mcp.NewTool("batchCreatePhases",
+	mcp.WithDescription("Create multiple phases in a project at once"),
+	mcp.WithNumber(string(globals.ProjectId),
+		mcp.Required(),
+		mcp.Description("ID of the project to create phases in"),
+	),
+	mcp.WithString(string(globals.Phases),
+		mcp.Required(),
+		mcp.Description("JSON array of phase definitions. Each: { name (string), description (string), startDate (string YYYY-MM-DD), endDate (string YYYY-MM-DD), sortId (int) }"),
+	),
+)

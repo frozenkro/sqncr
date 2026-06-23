@@ -133,12 +133,12 @@ func (h *Handlers) AddTaskHandler(ctx context.Context, request mcp.CallToolReque
 		SortId:       sort,
 		Dependencies: deps,
 	}
-	err = h.svc.AddTask(ctx, int64(projectId), args)
+	taskId, err := h.svc.AddTask(ctx, int64(projectId), args)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	return mcp.NewToolResultText("Task added successfully"), nil
+	return mcp.NewToolResultText(fmt.Sprintf("Task added successfully (TaskId: %d)", taskId)), nil
 }
 
 func (h *Handlers) BeginTaskHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -580,4 +580,119 @@ func (h *Handlers) GetUpstreamTasksHandler(ctx context.Context, request mcp.Call
 
 func requiredParamError(param globals.McpArg, err error) *mcp.CallToolResult {
 	return mcp.NewToolResultError(fmt.Sprintf("Required parameter '%v' returned error: %v", param, err.Error()))
+}
+
+func (h *Handlers) DeleteTaskHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	taskId, err := request.RequireInt(string(globals.TaskId))
+	if err != nil {
+		return requiredParamError(globals.TaskId, err), nil
+	}
+
+	err = h.svc.DeleteTask(ctx, int64(taskId))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return mcp.NewToolResultText("Task deleted successfully"), nil
+}
+
+func (h *Handlers) BatchUpdateTasksHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	updatesJson, err := request.RequireString(string(globals.TaskUpdates))
+	if err != nil {
+		return requiredParamError(globals.TaskUpdates, err), nil
+	}
+
+	var updates []models.BatchTaskUpdate
+	if err := json.Unmarshal([]byte(updatesJson), &updates); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Error parsing TaskUpdates JSON: %v", err)), nil
+	}
+
+	count, err := h.svc.BatchUpdateTasks(ctx, updates)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return mcp.NewToolResultText(fmt.Sprintf("Updated %d tasks successfully", count)), nil
+}
+
+func (h *Handlers) BatchAddTasksHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	projectId, err := request.RequireInt(string(globals.ProjectId))
+	if err != nil {
+		return requiredParamError(globals.ProjectId, err), nil
+	}
+
+	tasksJson, err := request.RequireString(string(globals.Tasks))
+	if err != nil {
+		return requiredParamError(globals.Tasks, err), nil
+	}
+
+	var tasks []models.CreateTaskArgs
+	if err := json.Unmarshal([]byte(tasksJson), &tasks); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Error parsing Tasks JSON: %v", err)), nil
+	}
+
+	ids, err := h.svc.BatchAddTasks(ctx, int64(projectId), tasks)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	idsJson, err := json.Marshal(ids)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return mcp.NewToolResultText(string(idsJson)), nil
+}
+
+func (h *Handlers) BatchAddExitCriteriaHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	criteriaJson, err := request.RequireString(string(globals.ExitCriteria))
+	if err != nil {
+		return requiredParamError(globals.ExitCriteria, err), nil
+	}
+
+	var criteria []models.BatchExitCriterionArgs
+	if err := json.Unmarshal([]byte(criteriaJson), &criteria); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Error parsing ExitCriteria JSON: %v", err)), nil
+	}
+
+	result, err := h.svc.BatchAddExitCriteria(ctx, criteria)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	resultJson, err := json.Marshal(result)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return mcp.NewToolResultText(string(resultJson)), nil
+}
+
+func (h *Handlers) BatchCreatePhasesHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	projectId, err := request.RequireInt(string(globals.ProjectId))
+	if err != nil {
+		return requiredParamError(globals.ProjectId, err), nil
+	}
+
+	phasesJson, err := request.RequireString(string(globals.Phases))
+	if err != nil {
+		return requiredParamError(globals.Phases, err), nil
+	}
+
+	var phases []models.BatchPhaseArgs
+	if err := json.Unmarshal([]byte(phasesJson), &phases); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Error parsing Phases JSON: %v", err)), nil
+	}
+
+	result, err := h.svc.BatchCreatePhases(ctx, projectId, phases)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	resultJson, err := json.Marshal(result)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	return mcp.NewToolResultText(string(resultJson)), nil
 }
